@@ -15,10 +15,10 @@ limit_remaining -= min(limits[n], txps)
 
 Calculate p
 ```c
-exceed = txps - limits[n] # actual excess released
-fixed_limit = limits[n] - exceed # Subtract this time
-rxps * p = fixed_limit # Constraint formula for release probability
-p = fixed_limit / rxps # get the probability of release this time
+exceed = txps - limits[n] # actual excess
+fix_limit = limits[n] - exceed # fix back
+rxps * p = fix_limit # Constraint formula for pass probability p
+p = fixed_limit / rxps # get p, only used for next interval
 ```
 
 # Design:
