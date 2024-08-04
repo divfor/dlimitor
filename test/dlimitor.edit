@@ -1,0 +1,11 @@
+second_ticks = 1000000
+update_interval = 30000
+sliding_power_w = 5
+intp_power_k = 16
+qos_level_num = 4
+worker_num_per_numa = 11
+limit_total = 20000000
+limits[0]   = 300000
+limits[1]   = 200000
+limits[2]   = 2000
+limits[3]   = 10000
