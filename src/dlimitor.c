@@ -39,48 +39,6 @@ int dlimitor_update_config(dlimitor_t *limitor, dlimitor_cfg_t *cfg)
 }
 
 
-int old_dlimitor_update_config(dlimitor_t *limitor, dlimitor_cfg_t *cfg)
-{
-    uint64_t i, v;
-
-    if ((v = cfg->update_interval) > 0 && v != limitor->cfg.update_interval)
-    {
-        limitor->cfg.update_interval = v;
-        for (i = 0; i < limitor->cfg.numa_num; i++)
-            limitor->numas[i]->numa_update_interval = v;
-    }
-    if ((v = cfg->second_ticks) > 0 && v != limitor->cfg.second_ticks)
-        limitor->cfg.second_ticks = v;
-    if ((v = cfg->sliding_power_w) > 0 && v != limitor->cfg.sliding_power_w)
-        limitor->cfg.sliding_power_w = v;
-    if ((v = cfg->intp_power_k) > 0 && v != limitor->cfg.intp_power_k)
-    {
-        limitor->cfg.intp_power_k = v;
-        for (i = 0; i < limitor->cfg.numa_num; i++)
-            limitor->numas[i]->mask = (1 << v) - 1;
-    }
-    if ((v = cfg->qos_level_num) > 0 && v <= QOS_LEVEL_MAX && v != limitor->cfg.qos_level_num)
-    {
-        limitor->cfg.qos_level_num = v;
-        for (i = 0; i < limitor->cfg.numa_num; i++)
-            limitor->numas[i]->qos_num = v;
-    }
-    if ((v = cfg->numa_num) > 0 && limitor->cfg.numa_num == 0)
-        limitor->cfg.numa_num = v;
-    if ((v = cfg->worker_num_per_numa) > 0 && limitor->cfg.worker_num_per_numa == 0)
-    {
-        limitor->cfg.worker_num_per_numa = v;
-        for (i = 0; i < limitor->cfg.numa_num; i++)
-            limitor->numas[i]->worker_num = v;
-    }
-    if ((v = cfg->limit_total) > 0 && v != limitor->cfg.limit_total)
-        limitor->cfg.limit_total = v;
-    for (i = 0; i < QOS_LEVEL_MAX; i++)
-        if ((v = cfg->limits[i]) > 0 && v != limitor->cfg.limits[i])
-            limitor->cfg.limits[i] = v;
-    return 0;
-}
-
 int dlimitor_init(dlimitor_t *limitor, numa_update_t *numas[], dlimitor_cfg_t *cfg, uint64_t curr_time)
 {
     uint64_t size = sizeof(numa_update_t);
