@@ -227,7 +227,7 @@ main (int argc, char **argv)
 	numas[i] = numa;
     }
 
-    dlimitor_init(limitor, numas, &cfg, now_us());
+    dlimitor_init(limitor, numas, &cfg);
     printf("created limitor\n");
     thread_num = 2 * cfg.worker_num_per_numa;
     pthread_t pid[ thread_num + 2 ];

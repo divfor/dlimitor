@@ -7,7 +7,7 @@
 #define QOS_LEVEL_MAX 4
 #define COUNTER_MAX 2*QOS_LEVEL_MAX
 
-/* sizeof(uint64_t) * COUNTER_MAX = 64B: 20K MO * (18C+1+1=20) * 64B = 25MB per numa */
+/* 20K dlimitors * 20 cores * 64B = 25MB per numa */
 typedef struct rxtx { uint64_t rx, tx; } rxtx_t;
 
 typedef struct numa_update {
@@ -48,8 +48,8 @@ typedef struct dlimitor {
     numa_update_t *numas[NUMA_MAX];   /* malloc: must local to each numa node */
 } dlimitor_t;
 
-int dlimitor_init(dlimitor_t *limitor, numa_update_t *numas[], dlimitor_cfg_t *cfg, uint64_t curr_time);
+int dlimitor_init(dlimitor_t *limitor, numa_update_t *numas[], dlimitor_cfg_t *cfg);
 int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id, int pkt_qos_level, uint64_t pkt_num, uint64_t rndint, uint64_t curr_time);
 int dlimitor_update_config(dlimitor_t *limitor, dlimitor_cfg_t *cfg);
-int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped_useconds);
+int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped_time);
 #endif

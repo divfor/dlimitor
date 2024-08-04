@@ -39,18 +39,16 @@ int dlimitor_update_config(dlimitor_t *limitor, dlimitor_cfg_t *cfg)
 }
 
 
-int dlimitor_init(dlimitor_t *limitor, numa_update_t *numas[], dlimitor_cfg_t *cfg, uint64_t curr_time)
+int dlimitor_init(dlimitor_t *limitor, numa_update_t *numas[], dlimitor_cfg_t *cfg)
 {
     uint64_t size = sizeof(numa_update_t);
     int i = 0;
     memset(limitor, 0, sizeof(*limitor));
     memcpy(&limitor->cfg, cfg, sizeof(*cfg));
-    limitor->update_next_time = curr_time + limitor->cfg.update_interval;
     size += limitor->cfg.worker_num_per_numa * COUNTER_MAX * sizeof(uint64_t);
     for (i = 0; i < limitor->cfg.numa_num; i++)
     {
         memset(numas[i], 0, size);
-        numas[i]->update_next_time = curr_time + limitor->cfg.update_interval;
         numas[i]->memsize = size;
         numas[i]->numa_update_interval = limitor->cfg.update_interval;
         numas[i]->qos_num = limitor->cfg.qos_level_num;
@@ -90,7 +88,6 @@ int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
         return 0;
     for (i = 0; i < limitor->cfg.numa_num; i++)
     {
-        // dlimitor_numa_update(limitor->numas[i]); // remove if use fix_miss
         for (n = 0; n < counter_num; n++)
             sum[n] += limitor->numas[i]->sum[n];
     }
