@@ -7,7 +7,6 @@
 #include <string.h>
 #include <fcntl.h>
 #include <sched.h>
-#include <numa.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -15,8 +14,14 @@
 #include <sys/time.h>
 #include <sys/inotify.h>
 #include <assert.h>
+
+#ifdef NUMA_ALLOC
+#include <numa.h>
+#endif
+
 #include "mtrand.h"
 #include "dlimitor.h"
+
 
 static char* getconfig(const char* file, const char* name)
 {
@@ -69,6 +74,7 @@ int read_dlimitor_config(const char *file, void *cfg)
     char *s;
     dlimitor_cfg_t *c = (dlimitor_cfg_t *)cfg;
     memset(c, 0, sizeof(dlimitor_cfg_t));
+
     if ((s = getconfig(file, "update_interval")) != NULL)
          c->update_interval = atoll(s);
     if ((s = getconfig(file, "second_ticks")) != NULL)
@@ -163,9 +169,10 @@ thread_function (void *data)
     int tid = syscall (SYS_gettid);
     int qos_level;
     int core_id = tid % limitor->cfg.worker_num_per_numa;
-    int numa_id = core_id % NUMA_MAX; //numa_num_configured_nodes();
+    int numa_id = core_id % NUMA_MAX;
     uint64_t qos_num = limitor->cfg.qos_level_num;
     uint64_t rnd;
+#ifdef NUMA_ALLOC
     struct bitmask *mask = numa_allocate_nodemask();
     mask = numa_bitmask_clearall(mask);
     mask = numa_bitmask_setbit(mask,numa_id);
@@ -173,62 +180,80 @@ thread_function (void *data)
     numa_bind(mask);
     numa_set_membind(mask);
     numa_free_nodemask(mask);
-    printf ("pid[%ld]: started thread [%d]\n", syscall (SYS_gettid), getpid());
-    srand(tid);
+#endif
+    //printf ("pid[%ld]: started thread [%d]\n", syscall (SYS_gettid), getpid());
     mt_srand(tid);
     while (1) {
         rnd = mt_rand();
-	//usleep(0);
+        //usleep(0);
         qos_level = (rnd * tid) % qos_num;
         dlimitor_worker_update(limitor, numa_id, core_id, qos_level, 1, rnd, now_us());
     }
     return NULL;
 }
 
+int free_dlimitor_memory(dlimitor_t *limitor)
+{
+    uint64_t j;
 
-
+#ifdef NUMA_ALLOC
+    uint64_t size;
+    size = sizeof(numa_update_t) + limitor->cfg.worker_num_per_numa * COUNTER_MAX * sizeof(uint64_t);
+    for (j = 0; j < limitor->cfg.numa_num; j++)
+        if (limitor->numas[j])
+            numa_free((void *)(limitor->numas[j]), size);  
+#else
+    for (j = 0; j < limitor->cfg.numa_num; j++)
+        if (limitor->numas[j]) free(limitor->numas[j]);     
+#endif
+    free(limitor);
+    return 0;
+}
 
 int
 main (int argc, char **argv)
 {
-    uint64_t i, j, size, thread_num = 11;
+    uint64_t i, size, thread_num = 11;
     //int cpu_num = sysconf(_SC_NPROCESSORS_ONLN);
     dlimitor_t *limitor;
     numa_update_t *numa, *numas[NUMA_MAX];
     dlimitor_cfg_t cfg = {
-            50000,       /* .update_interval */
-	    1000000,     /* .second_ticks */
-            3,           /* .sliding_power_w */
-            16,          /* .intp_power_k */
-            4      ,     /* .qos_level_num */
-            NUMA_MAX,    /* .numa_num */
-            thread_num,  /* .worker_num_per_numa */
-	    2000000,     /* .limit_total */
-	    {[0]=300000, [1]=200000, [2]=2000,[3]=10000}
+        32258,       /* .update_interval */
+        1000000,     /* .second_ticks */
+        4,           /* .sliding_power_w */
+        16,          /* .intp_power_k */
+        4,           /* .qos_level_num */
+        NUMA_MAX,    /* .numa_num */
+        thread_num,  /* .worker_num_per_numa */
+        20000000,    /* .limit_total */
+        {[0]=40000, [1]=20000, [2]=2000,[3]=10000}
     };
-  
+
     /* malloc for dlimtor structure */
     if (posix_memalign ((void **) (&limitor), 64, sizeof (*limitor)))
         return -1;
 
     /* per-numa malloc for numa_update_t structure and worker counters */
-    int numa_num = numa_num_configured_nodes();
-    printf("numa max nodes is %d\n", numa_num);
     size = sizeof(*numa) + cfg.worker_num_per_numa * COUNTER_MAX * sizeof(uint64_t);
+#ifdef NUMA_ALLOC
+    numa_set_strict(1);
+    cfg.numa_num = numa_num_configured_nodes();
+    printf("numa max nodes is %ld\n", cfg.numa_num);
+#endif
     for (i = 0; i < cfg.numa_num; i++) {
-	numa_set_strict(1);
-	numa = numa_alloc_onnode(size, i);
-        if (!numa){
-            for (j = 0; j < i; j++)
-            if (numas[j])
-                numa_free((void *)numas[j], size);
-            free(limitor);
-	}
-	numas[i] = numa;
+#ifdef NUMA_ALLOC
+        if (!(numa = numa_alloc_onnode(size, i)))
+            return free_dlimitor_memory(limitor);
+#else
+        if (posix_memalign ((void **) (&numa), 64, size))
+            return free_dlimitor_memory(limitor);
+#endif
+        numas[i] = numa;
     }
 
     dlimitor_init(limitor, numas, &cfg);
     printf("created limitor\n");
+
     thread_num = 2 * cfg.worker_num_per_numa;
     pthread_t pid[ thread_num + 2 ];
     
@@ -249,9 +274,5 @@ main (int argc, char **argv)
     for (i = 0; i <= thread_num+1; i++)
         pthread_join (pid[i], NULL);
 
-    for (j = 0; j < cfg.numa_num; j++)
-        if (numas[j])
-           numa_free((void *)numas[j], size);
-    free(limitor);
-    return 0;
+    return free_dlimitor_memory(limitor);
 }
