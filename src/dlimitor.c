@@ -82,7 +82,7 @@ int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
     uint64_t limit, remaining;
     uint64_t sum[COUNTER_MAX] = {0};
 
-    if ((n = round(duration / limitor->cfg.update_interval)) < 1)
+    if ((n = round(duration * 1.0 / limitor->cfg.update_interval)) < 1)
         return 0;
     for (i = 0; i < limitor->cfg.numa_num; i++)
         for (j = 0; j < counter_num; j++)
@@ -143,10 +143,12 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
         level->tx += pkt_num;
         ret = INTP_PASS;
     }
-    prev_time = numa->update_next_time;
-    if (curr_time < prev_time || (rndint & 0xf) < 15)
+    if ((rndint & 0xff) > 15 )
         return ret;
-    next_time = curr_time + numa->numa_update_interval + (rndint & 0xf);
+    prev_time = numa->update_next_time;
+    if (curr_time < prev_time)
+        return ret;
+    next_time = curr_time + numa->numa_update_interval;
     if (!cas(&numa->update_next_time, prev_time, next_time)) {
         limitor->numa_atomic_fails++;
         return ret;
