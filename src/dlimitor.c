@@ -122,7 +122,8 @@ int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
             intp = (n << k) / (rxps > 0 ? rxps : 1);        /* rxps * p = fixed_limit, intp = (p << k) */
             remaining -= (limit > txps ? txps : limit);
         }
-        limitor->intp[i] = intp;
+        limitor->intp[i] = limitor->intp[i] - (limitor->intp[i] >> 2) + (intp >> 2);
+        //limitor->intp[i] = intp;
         for (j = 0; j < limitor->cfg.numa_num; j++)
             if (intp != limitor->numas[j]->intp[i])
                 limitor->numas[j]->intp[i] = intp;
