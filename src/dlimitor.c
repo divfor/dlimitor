@@ -11,6 +11,8 @@
 #define INTP_PASS 0
 #define INTP_DROP 1
 #define cas(dst, old, new) __sync_bool_compare_and_swap((dst), (old), (new))
+/* weights [1-a,a] becomes [(1-a)^n, 1-(1-a)^n] if no arrivals within n steps */
+#define sliding_steps(v, w, n) ((v) > 0 ? ((v) * pow(1 - 1.0/(1 << (w)), (n))) : 0)
 
 int dlimitor_update_config(dlimitor_t *limitor, dlimitor_cfg_t *cfg)
 {
@@ -75,36 +77,29 @@ int dlimitor_numa_update(numa_update_t *numa)
 
 int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
 {
-    uint64_t i, j, n, add, old, nps, rxps, txps, intp;
+    uint64_t i, j, old, nps, rxps, txps, intp, fixp;
     uint64_t w = limitor->cfg.sliding_power_w;
     uint64_t k = limitor->cfg.intp_power_k;
     uint64_t counter_num = limitor->cfg.qos_level_num << 1;
     uint64_t limit, remaining;
     uint64_t sum[COUNTER_MAX] = {0};
+    double freq, beta, new;
 
-    if ((n = round(duration * 1.0 / limitor->cfg.update_interval)) < 1)
+    if (duration < limitor->cfg.update_interval)
         return 0;
+    freq = (limitor->cfg.second_ticks * 1.0 / duration);
+    beta = pow ((1.0 - 1.0/(1<<w)), (duration *1.0/limitor->cfg.update_interval));
     for (i = 0; i < limitor->cfg.numa_num; i++)
         for (j = 0; j < counter_num; j++)
             sum[j] += limitor->numas[i]->sum[j];
     for (i = 0; i < counter_num; i++)
     {
         old = limitor->sum[i];
-        /* assert(sum[i] > limitor->sum[i]) */
-        add = sum[i] > old ? sum[i] - old : 0;
+        new = (sum[i] <= old) ? 0.0 : (sum[i] - old) * freq;
         limitor->sum[i] = sum[i];
-        nps = limitor->nps[i];
-        if ((old = nps) > 0) {
-            /* weight (1-a) becomes (1-a)^n if no arrivals within n steps */
-            /* weighted old value: nps = nps * (1-1/2^w)^n */
-            if (n < 100)
-                for (j = 0; j < n; j++, nps -= (nps >> w));
-            else
-                nps *= pow(((1<<w)-1)*1.0/(1<<w), n);
-            /* weighted new value: add = add * (1 - (1-a)^n) = add * (1 - (ew_nps/orig_nps)) */
-            add -= add * nps / old;
-        }
-        limitor->nps[i] = nps + add * limitor->cfg.second_ticks / duration;
+        if ((nps = limitor->nps[i]) > 0)
+            new = nps * beta + new * (1 - beta);
+        limitor->nps[i] = new;
     }
     remaining = limitor->cfg.limit_total;
     for (i = 0; i < limitor->cfg.qos_level_num; i++)
@@ -112,20 +107,21 @@ int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
         intp = 0;
         if (remaining > 0)
         {
-            limit = limitor->cfg.limits[i];
-            limit = limit > remaining ? remaining : limit;
             rxps = limitor->nps[2 * i];
             txps = limitor->nps[2 * i + 1];
-            n = (txps > limit) ? (txps - limit) : 0;        /* n = how many txps exceeds limit */
-            n = limit > 0 ? (n << 4) * txps / limit : 0;    /* n = diff scaled up */
-            n = limit > n ? limit - n : limit;              /* n = limit fixed back */
-            intp = (n << k) / (rxps > 0 ? rxps : 1);        /* rxps * p = fixed_limit, intp = (p << k) */
+            limit = limitor->cfg.limits[i];
+            limit = limit > remaining ? remaining : limit;
             remaining -= (limit > txps ? txps : limit);
+            rxps = (rxps > 0 ? rxps : 1);
+            intp = (limit << k) / rxps;                        
+            fixp = (txps << k) / rxps;
+            fixp = (fixp > intp) ? ((fixp - intp) << 4) : 0;    /* diff(intp) and scaled up */
+            intp = (intp > fixp) ? (intp - fixp) : intp;        /* fix intp */
         }
-        limitor->intp[i] = limitor->intp[i] - (limitor->intp[i] >> 2) + (intp >> 2);
-        //limitor->intp[i] = intp;
+        //intp = limitor->intp[i] * beta + intp * (1 - beta);
+        limitor->intp[i] = intp;
         for (j = 0; j < limitor->cfg.numa_num; j++)
-            if (intp != limitor->numas[j]->intp[i])
+            if (limitor->numas[j]->intp[i] != intp)
                 limitor->numas[j]->intp[i] = intp;
     }
     return 0;
@@ -167,25 +163,29 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
     return ret;
 }
 
-int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped)
+int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped, uint64_t old[], uint64_t secs)
 {
     char *b10 = "          ";
     int j;
-    uint64_t rx, tx, rxps, txps, tx_rx, limit, intp;
+    uint64_t rx, tx, rxr, txr, rxps, txps, tx_rx, limit, intp;
+
     printf ("-----------------------------------------------------------------------------------------\n");
-    printf ("qos qos_limit   rxps%s txps%s int_p  tx/rx  rx_count%s   tx_count%s   rxpps%stxpps%s\n", 
-             b10, b10, b10, b10, b10, b10);
+    printf ("qos qos_limit   sliding-rxps-real sliding-txps-real int_p  tx/rx  rx_count%s   tx_count%s   rxpps%stxpps%s\n", 
+             b10, b10, b10, b10);
     for (j = 0; j < limitor->cfg.qos_level_num; j++) {
        limit = limitor->cfg.limits[j];
        rxps = limitor->nps[2*j];
        txps = limitor->nps[2*j+1];
        rx = limitor->sum[2*j];
        tx = limitor->sum[2*j+1];
-       intp = limitor->intp[j];
+       rxr = (rx - old[2*j])/secs;
+       txr = (tx - old[2*j+1])/secs;
+       intp = limitor->numas[0]->intp[j];
        tx_rx = (txps << limitor->cfg.intp_power_k) / (rxps>0?rxps:1); /* void divide by zero */
-        printf ("%-3d %-11lu %-14lu %-14lu %-6lu %-6lu %-20lu %-20lu %-14lu %-14lu\n", 
-                  j,  limit, rxps, txps, intp, tx_rx, rx, tx, 
-		  rx * limitor->cfg.second_ticks / escaped, tx * limitor->cfg.second_ticks / escaped);
+       printf ("%-3d %-11lu %-8lu/%-8lu %-8lu/%-8lu %-6lu %-6lu %-20lu %-20lu %-14lu %-14lu\n", 
+                j, limit, rxps, rxr, txps, txr, intp, tx_rx, rx, tx,
+                rx * limitor->cfg.second_ticks / escaped,
+                tx * limitor->cfg.second_ticks / escaped);
     }
   printf ("------------------------------------------------------------------------------------------\n");
   printf ("limit_total=%lu, sliding_w=%lu, intp_k=%lu, qos_num=%lu\n",

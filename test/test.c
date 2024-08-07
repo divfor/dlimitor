@@ -152,12 +152,14 @@ void* thread_inotify (void *data)
 
 void * thread_prints (void *data)
 {
+    uint64_t old[COUNTER_MAX] = {0};
     dlimitor_t *limitor = (dlimitor_t *)data;
     //printf ("pid[%ld]: started thread_printf() \n", syscall (SYS_gettid));
-    uint64_t t0 = now_us();
+    uint64_t t0 = now_us(), secs = 1;
     while (1) {
-      sleep (2);
-      dlimitor_host_stats (limitor, (now_us() - t0));
+      memcpy(old, limitor->sum, 64);
+      sleep (secs);
+      dlimitor_host_stats (limitor, (now_us() - t0), old, secs);
     }
     return NULL;
 }

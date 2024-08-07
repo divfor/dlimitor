@@ -50,5 +50,5 @@ typedef struct dlimitor {
 int dlimitor_init (dlimitor_t *limitor, numa_update_t *numas[], dlimitor_cfg_t *cfg);
 int dlimitor_worker_update (dlimitor_t *limitor, int numa_id, int core_id, int pkt_qos_level, uint64_t pkt_num, uint64_t rndint, uint64_t curr_time);
 int dlimitor_update_config (dlimitor_t *limitor, dlimitor_cfg_t *cfg);
-int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped_time);
+int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped_time, uint64_t *old, uint64_t secs);
 #endif
