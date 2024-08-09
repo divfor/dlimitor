@@ -10,6 +10,7 @@
 
 #define INTP_PASS 0
 #define INTP_DROP 1
+#define min(a, b) ((a) > (b) ? (b) : (a))
 #define cas(dst, old, new) __sync_bool_compare_and_swap((dst), (old), (new))
 /* weights [1-a,a] becomes [(1-a)^n, 1-(1-a)^n] if no arrivals within n steps */
 #define sliding_steps(v, w, n) ((v) > 0 ? ((v) * pow(1 - 1.0/(1 << (w)), (n))) : 0)
@@ -77,30 +78,36 @@ int dlimitor_numa_update(numa_update_t *numa)
 
 int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
 {
-    uint64_t i, j, old, nps, rxps, txps, intp, fixp;
-    uint64_t w = limitor->cfg.sliding_power_w;
-    uint64_t k = limitor->cfg.intp_power_k;
-    uint64_t counter_num = limitor->cfg.qos_level_num << 1;
-    uint64_t limit, remaining;
-    uint64_t sum[COUNTER_MAX] = {0};
+    uint64_t i, j, k, rxps, txps, intp, fixp, limit, remaining;
     double freq, beta, new;
+    uint64_t sum[COUNTER_MAX] = {0};
 
     if (duration < limitor->cfg.update_interval)
         return 0;
     freq = (limitor->cfg.second_ticks * 1.0 / duration);
-    beta = pow ((1.0 - 1.0/(1<<w)), (duration *1.0/limitor->cfg.update_interval));
+#ifdef DEBUG
+    beta = duration * 1.0 / limitor->cfg.update_interval;
+    if (beta < 100000 && beta > limitor->stats.duration_intervals_max)
+        limitor->stats.duration_intervals_max = beta;
+    limitor->stats.duration_intervals_avg *= 0.9;
+    limitor->stats.duration_intervals_avg += 0.1 * beta;
+#endif
+    beta = pow ((1.0 - 1.0 / (1 << limitor->cfg.sliding_power_w)), \
+                (duration * 1.0 / limitor->cfg.update_interval));
+    k = (limitor->cfg.qos_level_num << 1);
     for (i = 0; i < limitor->cfg.numa_num; i++)
-        for (j = 0; j < counter_num; j++)
+        for (j = 0; j < k; j++)
             sum[j] += limitor->numas[i]->sum[j];
-    for (i = 0; i < counter_num; i++)
+    for (i = 0; i < k; i++)
     {
-        old = limitor->sum[i];
-        new = (sum[i] <= old) ? 0.0 : (sum[i] - old) * freq;
+        j = limitor->sum[i];
+        new = (sum[i] > j) ? (sum[i] - j) * freq : 0.0;
         limitor->sum[i] = sum[i];
-        if ((nps = limitor->nps[i]) > 0)
-            new = nps * beta + new * (1 - beta);
+        if ((j = limitor->nps[i]) > 0)
+            new = j * beta + new * (1 - beta);     /* beta = (1 - 1/2^w)^n */
         limitor->nps[i] = new;
     }
+    k = limitor->cfg.intp_power_k;
     remaining = limitor->cfg.limit_total;
     for (i = 0; i < limitor->cfg.qos_level_num; i++)
     {
@@ -110,13 +117,13 @@ int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
             rxps = limitor->nps[2 * i];
             txps = limitor->nps[2 * i + 1];
             limit = limitor->cfg.limits[i];
-            limit = limit > remaining ? remaining : limit;
-            remaining -= (limit > txps ? txps : limit);
+            limit = min (limit, remaining);
+            remaining -= min (limit, txps);
             rxps = (rxps > 0 ? rxps : 1);
-            intp = (limit << k) / rxps;                        
+            intp = (limit << k) / rxps;
             fixp = (txps << k) / rxps;
-            fixp = (fixp > intp) ? ((fixp - intp) << 4) : 0;    /* diff(intp) and scaled up */
-            intp = (intp > fixp) ? (intp - fixp) : intp;        /* fix intp */
+            fixp = (fixp > intp) ? (fixp - intp) << 4 : 0;  /* scale num that fixp exceeds intp */
+            intp = (intp > fixp) ? (intp - fixp) : intp;    /* fix intp */
         }
         //intp = limitor->intp[i] * beta + intp * (1 - beta);
         limitor->intp[i] = intp;
@@ -124,6 +131,13 @@ int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
             if (limitor->numas[j]->intp[i] != intp)
                 limitor->numas[j]->intp[i] = intp;
     }
+#ifdef DEBUG
+    j = limitor->stats.atomic_fails_last;
+    k = limitor->stats.atomic_fails;
+    j = k > j ? (k - j) * freq : 0;
+    limitor->stats.atomic_fails_last = k;
+    limitor->stats.atomic_fails_rate  = limitor->stats.atomic_fails_rate  * beta + j * (1 - beta);
+#endif
     return 0;
 }
 
@@ -131,6 +145,7 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
                            int pkt_qos_level, uint64_t pkt_num, uint64_t rndint, uint64_t curr_time)
 {
     uint64_t prev_time, next_time;
+    //uint64_t rate = limitor->stats.atomic_fails_rate;
     int ret = INTP_DROP;
     numa_update_t *numa = limitor->numas[numa_id];
     rxtx_t *level = (rxtx_t *)&(numa->worker[core_id][2 * pkt_qos_level]);
@@ -140,14 +155,16 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
         level->tx += pkt_num;
         ret = INTP_PASS;
     }
-    if ((rndint & 0xff) > 15 )
+    if ((rndint & 0xff) > 15) // + (rate & 0xff) > 16)
         return ret;
     prev_time = numa->update_next_time;
     if (curr_time < prev_time)
         return ret;
     next_time = curr_time + numa->numa_update_interval;
     if (!cas(&numa->update_next_time, prev_time, next_time)) {
-        limitor->numa_atomic_fails++;
+#ifdef DEBUG
+        limitor->stats.atomic_fails++;
+#endif
         return ret;
     }
     dlimitor_numa_update(numa);
@@ -156,14 +173,16 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
         return ret;
     next_time = curr_time + limitor->cfg.update_interval;
     if (!cas(&limitor->update_next_time, prev_time, next_time)) {
-        limitor->host_atomic_fails++;
+#ifdef DEBUG
+        limitor->stats.atomic_fails++;
+#endif
         return ret;
     }
     dlimitor_host_update(limitor, (next_time - prev_time));
     return ret;
 }
 
-int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped, uint64_t old[], uint64_t secs)
+int dlimitor_host_stats (dlimitor_t * limitor, uint64_t total_escaped, uint64_t sleep_counters[], uint64_t sleep_secs)
 {
     char *b10 = "          ";
     int j;
@@ -178,14 +197,14 @@ int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped, uint64_t old[],
        txps = limitor->nps[2*j+1];
        rx = limitor->sum[2*j];
        tx = limitor->sum[2*j+1];
-       rxr = (rx - old[2*j])/secs;
-       txr = (tx - old[2*j+1])/secs;
+       rxr = (rx - sleep_counters[2*j]) / sleep_secs;
+       txr = (tx - sleep_counters[2*j+1]) / sleep_secs;
        intp = limitor->numas[0]->intp[j];
        tx_rx = (txps << limitor->cfg.intp_power_k) / (rxps>0?rxps:1); /* void divide by zero */
        printf ("%-3d %-11lu %-8lu/%-8lu %-8lu/%-8lu %-6lu %-6lu %-20lu %-20lu %-14lu %-14lu\n", 
                 j, limit, rxps, rxr, txps, txr, intp, tx_rx, rx, tx,
-                rx * limitor->cfg.second_ticks / escaped,
-                tx * limitor->cfg.second_ticks / escaped);
+                rx * limitor->cfg.second_ticks / total_escaped,
+                tx * limitor->cfg.second_ticks / total_escaped);
     }
   printf ("------------------------------------------------------------------------------------------\n");
   printf ("limit_total=%lu, sliding_w=%lu, intp_k=%lu, qos_num=%lu\n",
@@ -194,9 +213,13 @@ int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped, uint64_t old[],
   printf("update_interval=%lu, second_ticks=%lu, numa_num=%lu, worker_num_per_numa=%lu\n",
 		  limitor->cfg.update_interval, limitor->cfg.second_ticks,
 		  limitor->cfg.numa_num, limitor->cfg.worker_num_per_numa);
-  printf("atomic fails: numa=%lu, host=%lu\n", limitor->numa_atomic_fails, limitor->host_atomic_fails);
-  if (escaped > 0)
-     printf ("escaped_time=%.3fs\n\n", escaped * 1.0 / limitor->cfg.second_ticks);
+#ifdef DEBUG
+  printf("atomic fails=%lu, last=%lu, fails_rate=%.3f\n", \
+        limitor->stats.atomic_fails, limitor->stats.atomic_fails_last, limitor->stats.atomic_fails_rate);
+  printf("duration/interval max=%.3f, avg=%.3f\n", limitor->stats.duration_intervals_max, limitor->stats.duration_intervals_avg);
+#endif
+  if (total_escaped > 0)
+     printf ("escaped_time=%.3fs\n\n", total_escaped * 1.0 / limitor->cfg.second_ticks);
   fflush (stdout);
   return 0;
 }

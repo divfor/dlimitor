@@ -1,6 +1,8 @@
 #ifndef __DLIMITOR__
 #define __DLIMITOR__
 
+//#define DEBUG
+
 #include <stdint.h>
 
 #define NUMA_MAX 2
@@ -8,6 +10,14 @@
 #define COUNTER_MAX 2*QOS_LEVEL_MAX
 
 typedef struct rxtx { uint64_t rx, tx; } rxtx_t;
+
+typedef struct dlimitor_stats {
+    uint64_t atomic_fails;
+    uint64_t atomic_fails_last;
+    double   atomic_fails_rate;
+    double   duration_intervals_max;
+    double   duration_intervals_avg;
+} dlimitor_stats_t;
 
 typedef struct numa_update {
     volatile uint64_t update_next_time;  /* atomic updated by workers of same numa */
@@ -36,19 +46,17 @@ typedef struct dlimitor_cfg {
 
 /* distributed limitor */
 typedef struct dlimitor {
-    dlimitor_cfg_t cfg;               /* input: copy from create_dlimitor's dlimitor_cfg */
-    uint64_t intp[QOS_LEVEL_MAX];     /* computed: level pass probilities, not for drop */
     uint64_t sum[COUNTER_MAX];        /* computed: sum of counters stored last time */
     uint64_t nps[COUNTER_MAX];        /* computed: sliding pps: rate -= rate>>w; rate += new>>w; */
+    uint64_t intp[QOS_LEVEL_MAX];     /* computed: level pass probilities, not for drop */
+    dlimitor_cfg_t cfg;               /* input: copy from create_dlimitor's dlimitor_cfg */
     volatile uint64_t update_next_time;  /* atomic updated by any worker of any numa */
-    uint64_t numa_atomic_fails;
-    uint64_t host_atomic_fails;
-    uint64_t padding[3];
+    dlimitor_stats_t stats;           /* 5 uint64_t */
     numa_update_t *numas[NUMA_MAX];   /* malloc: must local to each numa node */
 } dlimitor_t;
 
 int dlimitor_init (dlimitor_t *limitor, numa_update_t *numas[], dlimitor_cfg_t *cfg);
 int dlimitor_worker_update (dlimitor_t *limitor, int numa_id, int core_id, int pkt_qos_level, uint64_t pkt_num, uint64_t rndint, uint64_t curr_time);
 int dlimitor_update_config (dlimitor_t *limitor, dlimitor_cfg_t *cfg);
-int dlimitor_host_stats (dlimitor_t * limitor, uint64_t escaped_time, uint64_t *old, uint64_t secs);
+int dlimitor_host_stats (dlimitor_t * limitor, uint64_t total_escaped, uint64_t sleep_counters[], uint64_t sleep_secs);
 #endif

@@ -16,7 +16,8 @@ LIBS := m pthread numa
 LINKFLAGS := 
 #CFLAGS := -O2 -g -Wall -D_M_IX86
 #CFLAGS := -O2 -g -Wall -pg 
-CFLAGS := -O3 -Wall -march=native -msse4.2 -D_GNU_SOURCE $(LINKFLAGS)
+#CFLAGS := -O3 -Wall -march=native -mavx512f -msse4.2 -D_GNU_SOURCE $(LINKFLAGS)
+CFLAGS := -O3 -Wall -march=native -mavx512f -D_GNU_SOURCE $(LINKFLAGS)
 CXXFLAGS := $(CFLAGS)
 RM-F := rm -f
 

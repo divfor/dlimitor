@@ -152,14 +152,14 @@ void* thread_inotify (void *data)
 
 void * thread_prints (void *data)
 {
-    uint64_t old[COUNTER_MAX] = {0};
+    uint64_t sleep_counters[COUNTER_MAX] = {0};
     dlimitor_t *limitor = (dlimitor_t *)data;
     //printf ("pid[%ld]: started thread_printf() \n", syscall (SYS_gettid));
-    uint64_t t0 = now_us(), secs = 1;
+    uint64_t t0 = now_us(), sleep_seconds = 1;
     while (1) {
-      memcpy(old, limitor->sum, 64);
-      sleep (secs);
-      dlimitor_host_stats (limitor, (now_us() - t0), old, secs);
+      memcpy(sleep_counters, limitor->sum, 64);
+      sleep (sleep_seconds);
+      dlimitor_host_stats (limitor, (now_us() - t0), sleep_counters, sleep_seconds);
     }
     return NULL;
 }
@@ -187,7 +187,7 @@ thread_function (void *data)
     mt_srand(tid);
     while (1) {
         rnd = mt_rand();
-        //usleep(0);
+        //usleep(rnd & 0xffff); /* 0xfffff = 1,048,575 */
         qos_level = (rnd * tid) % qos_num;
         dlimitor_worker_update(limitor, numa_id, core_id, qos_level, 1, rnd, now_us());
     }
@@ -227,8 +227,8 @@ main (int argc, char **argv)
         4,           /* .qos_level_num */
         NUMA_MAX,    /* .numa_num */
         thread_num,  /* .worker_num_per_numa */
-        20000000,    /* .limit_total */
-        {[0]=40000, [1]=20000, [2]=2000,[3]=10000}
+        4110000,     /* .limit_total */
+        {[0]=4000000, [1]=2000, [2]=20000,[3]=100000}
     };
 
     /* malloc for dlimtor structure */
