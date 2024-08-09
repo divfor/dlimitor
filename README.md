@@ -4,6 +4,15 @@ a distributed limitor design for multiple NUMAs system.
 
 
 # algorithm
+
+Exponentially-weighted sliding mean and variance
+```c
+diff = x - mean
+incr = alpha * diff
+mean = mean + incr
+variance = (1 - alpha) * (variance + diff * incr)
+```
+
 pass_probability = p, drop_probability = 1 - p
 ```c
 arrive_rate * p = expected_limit_rate  
