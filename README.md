@@ -1,5 +1,7 @@
 # dlimitor
-a distributed limitor design for multiple NUMA system
+a distributed limitor design for multiple NUMAs system.
+<img width="959" alt="Pasted Graphic 13" src="https://github.com/user-attachments/assets/603340af-cc3f-488d-8884-5722963f6827">
+
 
 # algorithm
 pass_probability = p, drop_probability = 1 - p
