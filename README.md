@@ -7,6 +7,7 @@ a distributed limitor design for multiple NUMAs system.
 
 Exponentially-weighted sliding mean and variance
 ```c
+alpha = 1 - ((1 - alpha)^(duration / period))
 diff = x - mean
 incr = alpha * diff
 mean = mean + incr
