@@ -186,18 +186,21 @@ int dlimitor_host_stats (dlimitor_t * limitor, uint64_t curr_time)
 {
     static uint64_t prev_counters[COUNTER_MAX] = {0};
     static uint64_t start_time = 0, prev_time = 0;
+    uint64_t curr_counters[COUNTER_MAX] = {0};
     char *b9 = "         ";
     char *b3 = "   ";
-    uint64_t j, escaped_ticks, sleep_ticks, rx, tx, rxpps, txpps, rxps, txps, tx_rx, limit, intp;
+    uint64_t j, rx, tx, rxpps, txpps, rxps, txps, tx_rx, limit, intp;
+    double sleep_secs, total_secs;
 
-    if (prev_time == 0) {
+    if (start_time == 0) {
         memcpy(prev_counters, limitor->sum, 64);
         prev_time = curr_time;
         start_time = curr_time;
         return 0;
     }
-    escaped_ticks = curr_time - start_time;
-    sleep_ticks = curr_time - prev_time;
+    memcpy(curr_counters, limitor->sum, 64);
+    sleep_secs = (curr_time - prev_time) * 1.0 / limitor->cfg.second_ticks;
+    total_secs = (curr_time - start_time) * 1.0 / limitor->cfg.second_ticks;
     printf ("--------------------------------------------------------------------------------------------\n");
     printf ("qos qos_limit   sliding-rxps-real sliding-txps-real int_p  tx/rx  rx_count%s tx_count%s total_rxpps%s total_txpps%s \n", 
             b9, b9, b3, b3);
@@ -205,16 +208,15 @@ int dlimitor_host_stats (dlimitor_t * limitor, uint64_t curr_time)
         limit = limitor->cfg.limits[j];
         rxps = limitor->nps[2*j];
         txps = limitor->nps[2*j+1];
-        rx = limitor->sum[2*j];
-        tx = limitor->sum[2*j+1];
-        rxpps = (rx - prev_counters[2*j]) * limitor->cfg.second_ticks / sleep_ticks;
-        txpps = (tx - prev_counters[2*j+1]) * limitor->cfg.second_ticks / sleep_ticks;
-        intp = limitor->numas[0]->intp[j];
+        rx = curr_counters[2*j];
+        tx = curr_counters[2*j+1];
+        intp = limitor->intp[j];
         tx_rx = (txps << limitor->cfg.intp_power_k) / (rxps>0?rxps:1); /* void divide by zero */
+        rxpps = (uint64_t)((rx - prev_counters[2*j]) * 1.0 / sleep_secs);
+        txpps = (uint64_t)((tx - prev_counters[2*j+1]) * 1.0 / sleep_secs);
         printf ("%-3lu %-11lu %-8lu/%-8lu %-8lu/%-8lu %-6lu %-6lu %-17lu %-17lu %-14lu %-14lu\n", 
                 j, limit, rxps, rxpps, txps, txpps, intp, tx_rx, rx, tx,
-                rx * limitor->cfg.second_ticks / escaped_ticks,
-                tx * limitor->cfg.second_ticks / escaped_ticks);
+                (uint64_t)(rx * 1.0 / total_secs), (uint64_t)(tx * 1.0 / total_secs));
     }
     printf ("---------------------------------------------------------------------------------------------\n");
     printf ("limit_total=%lu, sliding_w=%lu, intp_k=%lu, qos_num=%lu\n",
@@ -228,10 +230,11 @@ int dlimitor_host_stats (dlimitor_t * limitor, uint64_t curr_time)
         limitor->stats.atomic_fails, limitor->stats.atomic_fails_last, limitor->stats.atomic_fails_rate);
     printf("duration/interval max=%.3f, avg=%.3f\n", limitor->stats.duration_intervals_max, limitor->stats.duration_intervals_avg);
 #endif
-    printf ("escaped_time=%.3fs\n\n", escaped_ticks * 1.0 / limitor->cfg.second_ticks);
-    memcpy(prev_counters, limitor->sum, 64);
+    printf ("escaped_time=%.3fs\n\n", total_secs);
+    memcpy(prev_counters, curr_counters, 64);
     prev_time = curr_time;
     fflush (stdout);
     return 0;
 }
+
 
