@@ -16,21 +16,21 @@ variance = (1 - alpha) * (variance + diff * incr)
 
 pass_probability = p, drop_probability = 1 - p
 ```c
-arrive_rate * p = expected_limit_rate  
+rxps * p = expected_limit_rate  # rxps - arrival number per second, p - probability for pass
 ```
 
 Calculate the remaining limit capacity
 ```c
-limits[n] = min(limits[n], limit_remaining) 
-limit_remaining -= min(limits[n], txps)  
+limit_allocated = min(limits[qos], limit_remaining) 
+limit_remaining -= min(limits[qos], txps) # txps - passed number per second
 ```
 
 Calculate p
 ```c
-exceed = txps - limits[n] # actual excess
-fix_limit = limits[n] - exceed # fix back
-rxps * p = fix_limit # Constraint formula for pass probability p
-p = fixed_limit / rxps # get p, only used for next interval
+expected_p = limits[qos] / rxps; # Constraint formula rxps * p = limit for pass probability p
+actual_p = txps / rxps; # measure actual rate from sliding move average
+excess =  actual_p > expected_p ? (actual_p - expected_p) : 0; # how many percent actually exceeded
+dispatch_p = expected_p - (excess << 4) # rapid fix and send out p, only used for next interval
 ```
 
 # Design:
