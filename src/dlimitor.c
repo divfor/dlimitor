@@ -182,45 +182,56 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
     return ret;
 }
 
-int dlimitor_host_stats (dlimitor_t * limitor, uint64_t total_escaped, uint64_t sleep_counters[], uint64_t sleep_secs)
+int dlimitor_host_stats (dlimitor_t * limitor, uint64_t curr_time)
 {
-    char *b10 = "          ";
-    int j;
-    uint64_t rx, tx, rxr, txr, rxps, txps, tx_rx, limit, intp;
+    static uint64_t prev_counters[COUNTER_MAX] = {0};
+    static uint64_t start_time = 0, prev_time = 0;
+    char *b9 = "         ";
+    char *b3 = "   ";
+    uint64_t j, escaped_ticks, sleep_ticks, rx, tx, rxpps, txpps, rxps, txps, tx_rx, limit, intp;
 
-    printf ("-----------------------------------------------------------------------------------------\n");
-    printf ("qos qos_limit   sliding-rxps-real sliding-txps-real int_p  tx/rx  rx_count%s   tx_count%s   rxpps%stxpps%s\n", 
-             b10, b10, b10, b10);
-    for (j = 0; j < limitor->cfg.qos_level_num; j++) {
-       limit = limitor->cfg.limits[j];
-       rxps = limitor->nps[2*j];
-       txps = limitor->nps[2*j+1];
-       rx = limitor->sum[2*j];
-       tx = limitor->sum[2*j+1];
-       rxr = (rx - sleep_counters[2*j]) / sleep_secs;
-       txr = (tx - sleep_counters[2*j+1]) / sleep_secs;
-       intp = limitor->numas[0]->intp[j];
-       tx_rx = (txps << limitor->cfg.intp_power_k) / (rxps>0?rxps:1); /* void divide by zero */
-       printf ("%-3d %-11lu %-8lu/%-8lu %-8lu/%-8lu %-6lu %-6lu %-20lu %-20lu %-14lu %-14lu\n", 
-                j, limit, rxps, rxr, txps, txr, intp, tx_rx, rx, tx,
-                rx * limitor->cfg.second_ticks / total_escaped,
-                tx * limitor->cfg.second_ticks / total_escaped);
+    if (prev_time == 0) {
+        memcpy(prev_counters, limitor->sum, 64);
+        prev_time = curr_time;
+        start_time = curr_time;
+        return 0;
     }
-  printf ("------------------------------------------------------------------------------------------\n");
-  printf ("limit_total=%lu, sliding_w=%lu, intp_k=%lu, qos_num=%lu\n",
-          limitor->cfg.limit_total, limitor->cfg.sliding_power_w, 
-	  limitor->cfg.intp_power_k, limitor->cfg.qos_level_num);
-  printf("update_interval=%lu, second_ticks=%lu, numa_num=%lu, worker_num_per_numa=%lu\n",
+    escaped_ticks = curr_time - start_time;
+    sleep_ticks = curr_time - prev_time;
+    printf ("--------------------------------------------------------------------------------------------\n");
+    printf ("qos qos_limit   sliding-rxps-real sliding-txps-real int_p  tx/rx  rx_count%s tx_count%s total_rxpps%s total_txpps%s \n", 
+            b9, b9, b3, b3);
+    for (j = 0; j < limitor->cfg.qos_level_num; j++) {
+        limit = limitor->cfg.limits[j];
+        rxps = limitor->nps[2*j];
+        txps = limitor->nps[2*j+1];
+        rx = limitor->sum[2*j];
+        tx = limitor->sum[2*j+1];
+        rxpps = (rx - prev_counters[2*j]) * limitor->cfg.second_ticks / sleep_ticks;
+        txpps = (tx - prev_counters[2*j+1]) * limitor->cfg.second_ticks / sleep_ticks;
+        intp = limitor->numas[0]->intp[j];
+        tx_rx = (txps << limitor->cfg.intp_power_k) / (rxps>0?rxps:1); /* void divide by zero */
+        printf ("%-3lu %-11lu %-8lu/%-8lu %-8lu/%-8lu %-6lu %-6lu %-17lu %-17lu %-14lu %-14lu\n", 
+                j, limit, rxps, rxpps, txps, txpps, intp, tx_rx, rx, tx,
+                rx * limitor->cfg.second_ticks / escaped_ticks,
+                tx * limitor->cfg.second_ticks / escaped_ticks);
+    }
+    printf ("---------------------------------------------------------------------------------------------\n");
+    printf ("limit_total=%lu, sliding_w=%lu, intp_k=%lu, qos_num=%lu\n",
+           limitor->cfg.limit_total, limitor->cfg.sliding_power_w, 
+	    limitor->cfg.intp_power_k, limitor->cfg.qos_level_num);
+    printf("update_interval=%lu, second_ticks=%lu, numa_num=%lu, worker_num_per_numa=%lu\n",
 		  limitor->cfg.update_interval, limitor->cfg.second_ticks,
 		  limitor->cfg.numa_num, limitor->cfg.worker_num_per_numa);
 #ifdef DEBUG
-  printf("atomic fails=%lu, last=%lu, fails_rate=%.3f\n", \
+    printf("atomic fails=%lu, last=%lu, fails_rate=%.3f\n", \
         limitor->stats.atomic_fails, limitor->stats.atomic_fails_last, limitor->stats.atomic_fails_rate);
-  printf("duration/interval max=%.3f, avg=%.3f\n", limitor->stats.duration_intervals_max, limitor->stats.duration_intervals_avg);
+    printf("duration/interval max=%.3f, avg=%.3f\n", limitor->stats.duration_intervals_max, limitor->stats.duration_intervals_avg);
 #endif
-  if (total_escaped > 0)
-     printf ("escaped_time=%.3fs\n\n", total_escaped * 1.0 / limitor->cfg.second_ticks);
-  fflush (stdout);
-  return 0;
+    printf ("escaped_time=%.3fs\n\n", escaped_ticks * 1.0 / limitor->cfg.second_ticks);
+    memcpy(prev_counters, limitor->sum, 64);
+    prev_time = curr_time;
+    fflush (stdout);
+    return 0;
 }
 

@@ -1,7 +1,7 @@
 #ifndef __DLIMITOR__
 #define __DLIMITOR__
 
-//#define DEBUG
+#define DEBUG
 
 #include <stdint.h>
 
@@ -58,5 +58,5 @@ typedef struct dlimitor {
 int dlimitor_init (dlimitor_t *limitor, numa_update_t *numas[], dlimitor_cfg_t *cfg);
 int dlimitor_worker_update (dlimitor_t *limitor, int numa_id, int core_id, int pkt_qos_level, uint64_t pkt_num, uint64_t rndint, uint64_t curr_time);
 int dlimitor_update_config (dlimitor_t *limitor, dlimitor_cfg_t *cfg);
-int dlimitor_host_stats (dlimitor_t * limitor, uint64_t total_escaped, uint64_t sleep_counters[], uint64_t sleep_secs);
+int dlimitor_host_stats (dlimitor_t * limitor, uint64_t curr_time);
 #endif
