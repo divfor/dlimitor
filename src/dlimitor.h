@@ -2,16 +2,16 @@
 #define __DLIMITOR__
 #include <stdint.h>
 
-//#define DEBUG
+#define DLIMITOR_DEBUG
 
 #define NUMA_MAX 2
 #define QOS_LEVEL_MAX 4
 #define COUNTER_MAX 2*QOS_LEVEL_MAX
 
-#ifdef DEBUG
-#define DEBUG_INC(a) do {a++;} while (0)
+#ifdef DLIMITOR_DEBUG
+#define DLIMITOR_DEBUG_INC(a) do {a++;} while (0)
 #else
-#define DEBUG_INC(a) do {} while (0)
+#define DLIMITOR_DEBUG_INC(a) do {} while (0)
 #endif
 
 typedef struct dlimitor_stats {
@@ -23,7 +23,7 @@ typedef struct dlimitor_stats {
 } dlimitor_stats_t;
 
 typedef struct numa_update {
-    volatile uint64_t update_next_time;  /* atomic updated by any worker of same numa */
+    uint64_t update_next_time;           /* volatile atomic updated by any worker of same numa */
     uint64_t numa_update_interval;       /* duration in usec to sum(counters_of_workers_of_this_numa) */
     uint64_t mask;                       /* mask for hash_value & (2^k - 1) */
     uint32_t counter_num;                /* number of counters in use, equal to 2 x qos_num */
@@ -49,8 +49,8 @@ typedef struct dlimitor_cfg {
 typedef struct dlimitor {
     uint64_t sum[COUNTER_MAX];           /* summize calc: store sums of numa->sum[] counters to diff at next time */
     uint64_t nps[COUNTER_MAX];           /* sliding calc: diff num per second, sliding rate = rate + (new - rate)/2^w; */
-    uint64_t err[COUNTER_MAX];          /* sliding calc: variance for each rxps (nps[2*j]) */
-    volatile uint64_t update_next_time;  /* atomic updated by any worker of any numa */
+    uint64_t err[COUNTER_MAX];           /* sliding calc: variance for each rxps (nps[2*j]) */
+    uint64_t update_next_time;           /* volatile atomic updated by any worker of any numa */
     dlimitor_cfg_t cfg;                  /* input: copy to init dlimitor_cfg */
     dlimitor_stats_t stats;              /* 5 uint64_t */
     numa_update_t *numas[NUMA_MAX];      /* malloc: must local to each numa node */

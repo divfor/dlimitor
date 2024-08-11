@@ -84,7 +84,7 @@ int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
     if (duration < limitor->cfg.update_interval)
         return 0;
     freq = (limitor->cfg.second_ticks * 1.0 / duration);
-#ifdef DEBUG
+#ifdef DLIMITOR_DEBUG
     beta = duration * 1.0 / limitor->cfg.update_interval;
     if (beta < 100000 && beta > limitor->stats.duration_intervals_max)
         limitor->stats.duration_intervals_max = beta;
@@ -125,14 +125,14 @@ int dlimitor_host_update(dlimitor_t *limitor, uint64_t duration)
             fixp = (txps << k) / rxps;
             fixp = (fixp > intp) ? (fixp - intp) << 4 : 0;  /* scale num that fixp exceeds intp */
             intp = (intp > fixp) ? (intp - fixp) : intp;    /* fix intp */
-            intp = (intp > (2 << k)) ? (2 << k) : intp;     /* resize to 2^k */
+            intp = (intp > (1 << k)) ? (1 << k) : intp;     /* resize to 2^k */
         }
         /* intp = limitor->intp[i] * beta + intp * (1 - beta); */
         for (j = 0; j < limitor->cfg.numa_num; j++)
             if (limitor->numas[j]->intp[i] != intp)
                 limitor->numas[j]->intp[i] = intp;
     }
-#ifdef DEBUG
+#ifdef DLIMITOR_DEBUG
     j = limitor->stats.atomic_fails_last;
     k = limitor->stats.atomic_fails;
     j = k > j ? (k - j) * freq : 0;
@@ -149,10 +149,10 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
     numa_update_t *numa = limitor->numas[numa_id];
     uint64_t prev_time, next_time, *c = &numa->worker[core_id][qos<<1];
 
-    *c++ += pkt_num;
+    c[0] += pkt_num;
     if ((rndint & numa->mask) < numa->intp[qos])
     {
-        *c += pkt_num;
+        c[1] += pkt_num;
         ret = INTP_PASS;
     }
     if ((rndint & 0xff) > 15) // + (rate & 0xff) > 16)
@@ -162,7 +162,7 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
         return ret;
     next_time = curr_time + numa->numa_update_interval;
     if (!cas(&numa->update_next_time, prev_time, next_time)) {
-        DEBUG_INC(limitor->stats.atomic_fails);
+        DLIMITOR_DEBUG_INC(limitor->stats.atomic_fails);
         return ret;
     }
     dlimitor_numa_update(numa);
@@ -171,7 +171,7 @@ int dlimitor_worker_update(dlimitor_t *limitor, int numa_id, int core_id,
         return ret;
     next_time = curr_time + limitor->cfg.update_interval;
     if (!cas(&limitor->update_next_time, prev_time, next_time)) {
-        DEBUG_INC(limitor->stats.atomic_fails);
+        DLIMITOR_DEBUG_INC(limitor->stats.atomic_fails);
         return ret;
     }
     dlimitor_host_update(limitor, (next_time - prev_time));
@@ -223,7 +223,7 @@ int dlimitor_host_stats (dlimitor_t * limitor, uint64_t curr_time)
     printf("update_interval=%lu, second_ticks=%lu, numa_num=%lu, worker_num_per_numa=%lu\n",
 		  limitor->cfg.update_interval, limitor->cfg.second_ticks,
 		  limitor->cfg.numa_num, limitor->cfg.worker_num_per_numa);
-#ifdef DEBUG
+#ifdef DLIMITOR_DEBUG
     printf("atomic fails=%lu, last=%lu, fails_rate=%.3f\n", \
         limitor->stats.atomic_fails, limitor->stats.atomic_fails_last, limitor->stats.atomic_fails_rate);
     printf("duration/interval max=%.3f, avg=%.3f\n", limitor->stats.duration_intervals_max, limitor->stats.duration_intervals_avg);
