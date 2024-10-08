@@ -2,6 +2,34 @@
 a distributed limitor design for multiple NUMAs system.
 <img width="959" alt="Pasted Graphic 13" src="https://github.com/user-attachments/assets/603340af-cc3f-488d-8884-5722963f6827">
 
+# usage example
+```c
+    uint32_t i, thread_num = 16;
+    uint32_t dlnum = (1U << 0);
+    dlimitor_cfg_t cfg = {
+        .sliding_power_w = 4,
+        .second_ticks = get_hz(),
+        .update_interval = get_hz()/((2<<4)-1),
+        .flags = (LOCAL_UPDATE), // LOCAL_UPDATE | PTR_BUCKET
+    };
+    uint32_t t = 19, q = t - 5;
+    dlimitor_qos_t default_qos = {
+        .qos_num = 4,
+        .limit_total = (1U<<t)/dlnum,            /* total limit up to 2048 Kpps */
+        .limits = { [0] = 3*2*(1U<<q)/dlnum,     /* white-list, limit to 3*128=384 Kpps */
+                    [1] = 3*3*(1U<<q)/dlnum,     /* new-incoming, limit to 3*192=576 Kpps */
+                    [2] = 3*3*(1U<<q)/dlnum,     /* established, limit to 3*192=576 Kpps */
+                    [3] = 1*24*(1U<<q)/dlnum,   /* grey-list, limit to 1*24*64=1536 Kpps */
+		   }
+    };
+    if ((dlnum = dlarray_init(&g_da, dlnum, thread_num, &cfg, &default_qos)) < 0)
+        goto ERR_RETURN;
+    for (i = 0; i < dlnum; i++) {
+        if (dlarray_add_limitor(&g_da, i, NULL) < 0)
+            goto ERR_RETURN;
+    }
+    printf("Successful add limitor [%d]\n", g_da.dlimitor_count);
+```
 
 # algorithm
 
