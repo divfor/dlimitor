@@ -4,12 +4,13 @@ a distributed limitor design for multiple NUMAs system.
 
 # usage example
 ```c
-    uint32_t i, thread_num = 16;
     uint32_t dlnum = (1U << 0);
+    dlarray_t g_da;
+    uint32_t i, thread_num = 16;
     dlimitor_cfg_t cfg = {
         .sliding_power_w = 4,
-        .second_ticks = get_hz(),
-        .update_interval = get_hz()/((2<<4)-1),
+        .second_ticks = 1000000, // get_hz()
+        .update_interval = 1000000/((2<<4)-1),
         .flags = (LOCAL_UPDATE), // LOCAL_UPDATE | PTR_BUCKET
     };
     uint32_t t = 19, q = t - 5;
@@ -20,7 +21,7 @@ a distributed limitor design for multiple NUMAs system.
                     [1] = 3*3*(1U<<q)/dlnum,     /* new-incoming, limit to 3*192=576 Kpps */
                     [2] = 3*3*(1U<<q)/dlnum,     /* established, limit to 3*192=576 Kpps */
                     [3] = 1*24*(1U<<q)/dlnum,   /* grey-list, limit to 1*24*64=1536 Kpps */
-		   }
+		   },
     };
     if ((dlnum = dlarray_init(&g_da, dlnum, thread_num, &cfg, &default_qos)) < 0)
         goto ERR_RETURN;
@@ -29,6 +30,9 @@ a distributed limitor design for multiple NUMAs system.
             goto ERR_RETURN;
     }
     printf("Successful add limitor [%d]\n", g_da.dlimitor_count);
+
+    /* from worker threads */
+    if(dlimitor_worker_update(numa, core_id, qos, pkt_num, randint(), curr_time)) return PASS;
 ```
 
 # algorithm
